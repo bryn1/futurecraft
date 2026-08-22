@@ -1,0 +1,151 @@
+/* style.css — FutureCraft app-shell base: fullscreen canvas + lock-overlay.
+   Design tokens (dark, calm, subtle-tech space) live in :root so hud.css can
+   reuse the same vocabulary. Token names, not values, below. */
+
+:root {
+  /* colour */
+  --bg: #0b0e14;          /* page / scene background (matches scene.background) */
+  --surface: #161b26;     /* panels    */
+  --surface-2: #1e2533;   /* raised    */
+  --border: #2a3347;      /* hairline  */
+  --text: #e6eaf3;        /* primary text    */
+  --text-muted: #94a0b8;  /* secondary text  */
+  --accent: #4fd1ff;      /* cyan — active/pick highlights */
+  --accent-soft: rgba(79, 209, 255, 0.16);
+  --danger: #ff6b6b;
+  --success: #57d48f;
+
+  /* type */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font-ui);
+
+  /* spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+
+  /* motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* #app is the fullscreen Three.js mount point (created in main()). */
+#app {
+  position: fixed;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+}
+#app canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Lock-overlay: shown first (C1), fullscreen flex-centered. */
+#lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(120% 120% at 50% 20%, rgba(79, 209, 255, 0.08), transparent 60%),
+              rgba(7, 10, 16, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: var(--space-5);
+}
+#lock-overlay[hidden] { display: none; }
+
+.lock-panel {
+  max-width: 440px;
+  width: 100%;
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+
+.lock-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: 2rem;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+.lock-title::after {
+  content: "";
+  display: block;
+  width: 48px;
+  height: 3px;
+  margin: var(--space-3) auto var(--space-2);
+  border-radius: 2px;
+  background: var(--accent);
+}
+.lock-sub {
+  margin: 0 0 var(--space-5);
+  color: var(--text-muted);
+}
+
+.lock-btn {
+  display: inline-block;
+  padding: var(--space-3) var(--space-6);
+  font: inherit;
+  font-weight: 600;
+  color: #06121a;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: transform 140ms var(--ease), box-shadow 140ms var(--ease),
+              background 140ms var(--ease);
+  box-shadow: 0 6px 20px rgba(79, 209, 255, 0.35);
+}
+.lock-btn:hover { background: #7fe0ff; transform: translateY(-1px); }
+.lock-btn:active { transform: translateY(0); }
+
+.lock-hint {
+  margin: var(--space-5) 0 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* Visible focus for keyboard users throughout. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.lock-btn:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+/* Respect reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  .lock-btn:hover { transform: none; }
+}

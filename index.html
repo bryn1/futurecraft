@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FutureCraft — voxelsandlåda</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/hud.css" />
+  <!-- C3: importmap — pin ALL of Three.js to ONE exact CDN r-number.
+       `three` and `three/addons/` map to the SAME 0.160.0 release so every
+       module (worldrender, player, edit) resolves the same engine version. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- App-shell page DOM. Lock-overlay shows first: a single "Click to play"
+       affordance that, when acted on, hands control to the pointer-locked
+       first-person camera. HUD (crosshair/readout/palette) is hud's concern. -->
+  <div id="lock-overlay" hidden>
+    <div class="lock-panel" role="dialog" aria-modal="false" aria-labelledby="lock-title">
+      <h1 id="lock-title" class="lock-title">FutureCraft</h1>
+      <p class="lock-sub">Voxelsandlåda — bygg, bryt, flyg.</p>
+      <button type="button" id="play-btn" class="lock-btn">Klicka för att spela</button>
+      <p class="lock-hint">Vänsterklick: bryt block · Högerklick: placera block
+        <br />WASD: flyg · Mellanslag: upp · Skift: ner</p>
+    </div>
+  </div>
+
+  <noscript>
+    <p style="padding:1rem;font-family:system-ui,sans-serif">FutureCraft kräver JavaScript.</p>
+  </noscript>
+
+  <script type="module">
+    import { main } from './js/app.js';
+    main().catch((err) => {
+      console.error('[futurecraft] main() failed', err);
+      const el = document.getElementById('lock-overlay');
+      if (el) {
+        el.hidden = false;
+        const btn = document.getElementById('play-btn');
+        if (btn) btn.textContent = 'Kunde inte starta — se konsolen';
+      }
+    });
+  </script>
+</body>
+</html>

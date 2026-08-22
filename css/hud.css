@@ -1,0 +1,142 @@
+/* FutureCraft hud module (C17) — overlay styles.
+   Independent of world canvas; sits above the renderer in a fixed layer.
+   Token-driven (color / spacing), keyboard-accessible, contrast-checked. */
+
+:root {
+  /* hud palette tokens */
+  --hud-bg: rgba(10, 14, 22, 0.82);          /* behind readout & reset */
+  --hud-bg-solid: #0a0e16;
+  --hud-ink: #e8eef7;                        /* primary text */
+  --hud-ink-dim: #9fb0c6;                    /* secondary text */
+  --hud-line: rgba(232, 238, 247, 0.35);      /* crosshair */
+  --hud-gap: 14px;
+  --hud-r: 10px;
+  --hud-focus: #7fb3ff;
+  --hud-active: #ffd54a;                     /* active slot marker */
+}
+
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none; /* let clicks pass through to the world */
+  color: var(--hud-ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  z-index: 20;
+}
+.hud button { pointer-events: auto; }
+
+/* ---- crosshair ---- */
+.hud__crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+}
+.hud__crosshair::before,
+.hud__crosshair::after {
+  content: "";
+  position: absolute;
+  background: var(--hud-line);
+}
+.hud__crosshair::before {  /* vertical bar */
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+}
+.hud__crosshair::after {   /* horizontal bar */
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+/* ---- readout ---- */
+.hud__readout {
+  position: absolute;
+  bottom: calc(var(--hud-gap) * 2);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--hud-bg);
+  padding: 8px 14px;
+  border-radius: var(--hud-r);
+  color: var(--hud-ink);
+  font-size: clamp(14px, 2.6vmin, 18px);
+  min-width: 180px;
+  text-align: center;
+  text-transform: capitalize;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- palette ---- */
+.hud__palette {
+  position: absolute;
+  bottom: var(--hud-gap);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+}
+.hud__palette-slot {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 2px solid rgba(232, 238, 247, 0.4);
+  background: var(--hud-bg-solid);
+  cursor: pointer;
+  position: relative;
+}
+/* digit badge in each slot */
+.hud__palette-slot::after {
+  content: attr(data-index);
+  position: absolute;
+  inset: -6px auto auto -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--hud-bg-solid);
+  border: 1px solid var(--hud-line);
+  color: var(--hud-ink-dim);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+.hud__palette-slot.active {
+  border-color: var(--hud-active);
+  box-shadow: 0 0 8px var(--hud-active) inset, 0 0 2px var(--hud-active);
+}
+.hud__palette-slot:focus-visible,
+.hud__reset:focus-visible {
+  outline: 2px solid var(--hud-focus);
+  outline-offset: 2px;
+}
+
+/* ---- reset button ---- */
+.hud__reset {
+  position: absolute;
+  top: var(--hud-gap);
+  right: var(--hud-gap);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-line);
+  border-radius: var(--hud-r);
+  color: var(--hud-ink);
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.hud__reset:hover { background: #111827; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .hud__palette-slot { transition: border-color 120ms ease, box-shadow 120ms ease; }
+  .hud__reset { transition: background 120ms ease; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud *, .hud *::before, .hud *::after { transition: none !important; }
+}
