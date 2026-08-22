@@ -56,6 +56,82 @@ export function collectUpdates(...modules) {
   return fns;
 }
 
+// --- FIX 402.1: safe spawn height -------------------------------------------
+// Blocks are a solid grid. A hardcoded camera Y can land INSIDE terrain — the old
+// camera.position.set(0, 6, 14) sat ~9 blocks UNDER the surface at that column for
+// the default seed, so the viewport was inside solid blocks: a blank screen
+// (esp. on phone, the card's symptom). Instead, pick a fixed spawn COLUMN and
+// derive the camera Y from the actual generated terrain: top of the column's
+// surface plus a headroom of open air, clamped into the world height band.
+// Worlds are deterministic per seed, so the layout at boot IS the layout the
+// camera sees. This is pure / headless-importable, so it is unit-testable.
+export const SPAWN = { x: 2, z: 2 };  // low-relief corner of the region (see worldgen)
+export const SPAWN_HEADROOM = 4;      // blocks of clear air above the surface
+export const SPAWN_MIN_Y = 2;         // never put the camera below this band
+
+// layout must expose get(x, y, z) -> block id (0 = air). Returns the camera Y
+// that places the camera in open air just above the local terrain surface.
+export function computeSpawnY(
+  layout,
+  { x, z, headroom = SPAWN_HEADROOM, minY = SPAWN_MIN_Y, maxY },
+) {
+  if (!maxY) throw new TypeError('computeSpawnY requires maxY (world height)');
+  let surface = -1; // top-most solid y under the column, -1 if all air
+  for (let y = 0; y < maxY; y++) {
+    if (layout.get(x, y, z) !== 0) surface = y;
+  }
+  const raw = surface >= 0 ? surface + headroom : headroom;
+  return Math.max(minY, Math.min(raw, maxY - 1));
+}
+
+// --- FIX 404.1: spawn-camera look-down ---------------------------------------
+// The player-fly contract (player.js) defaults the look direction to straight
+// down `{x:0, y:-1, z:0}` "until facing known", but the composed camera booted
+// with rotation (0,0,0) — level pitch, pointing off the region edge from the
+// corner spawn (SPAWN at x=2,z=2; facing -Z leaves the 64x64 region immediately).
+// The owner directed a fix on the app-shell: pitch the SPAWN camera DOWN at the
+// terrain so the voxel world fills the frame at boot, before the player locks the
+// pointer. This stays pure / headless-importable (layout math only), so it is
+// unit-testable exactly like computeSpawnY.
+export const SPAWN_LOOK_AHEAD = 1; // aim one block ahead of the feet along facing
+
+// cameraY : the spawn camera Y (open air above the terrain, from computeSpawnY).
+// layout  : must expose get(x,y,z) -> block id (0 = air).
+// Returns a downward camera pitch in radians (negative = looking down, THREE YXZ
+// euler -> set camera.rotation.x). Aims at the terrain surface below the spawn so
+// a spawned camera always frames real voxel earth, for any seed / world height.
+export function computeSpawnLookPitch(
+  cameraY,
+  layout,
+  { x, z, maxY, ahead = SPAWN_LOOK_AHEAD },
+) {
+  if (!Number.isFinite(cameraY) || !maxY || !layout) {
+    throw new TypeError('computeSpawnLookPitch(cameraY, layout, {x,z,maxY,ahead})');
+  }
+  const surfaceAt = (cx, cz) => {
+    let s = -1;
+    for (let y = 0; y < maxY; y++) if (layout.get(cx, y, cz) !== 0) s = y;
+    return s;
+  };
+  // Aim at the terrain just ahead of the feet ALONG THE FACING (-Z), so the
+  // ground fills the lower frame as you spawn looking down the -Z axis; never
+  // aim at air. If that ahead column is empty (region edge — the default corner
+  // spawn faces straight out of the 64x64 region), fall back to aiming straight
+  // down at the ground under the spawn column instead. Either way the spawned
+  // camera frames real voxel earth, never the void.
+  let sx = x;
+  let sz = z - ahead;
+  let horiz = ahead;
+  if (surfaceAt(sx, sz) < 0) {
+    sz = z;
+    horiz = 1;
+  }
+  const surfaceY = surfaceAt(sx, sz);
+  const targetY = surfaceY >= 0 ? surfaceY + 1 : 1;
+  const drop = Math.max(cameraY - targetY, 0.25);
+  return -Math.atan2(drop, horiz);
+}
+
 // --- C1: lock overlay --------------------------------------------------------
 // Present the "Click to play" overlay first (I5). Takes DOM handles so it is
 // unit-testable headless. The overlay is hidden once pointer lock engages, and
@@ -197,13 +273,37 @@ export async function main() {
   sun.position.set(20, 40, 10);
   scene.add(sun);
 
+  // FIX 402.1: region + layout must exist BEFORE the camera so the spawn can be
+  // placed above the actually-generated terrain (see computeSpawnY). The layout
+  // is deterministic per seed and is reused by makeWorld() below (no double gen).
+  const region = { width: 64, height: 24, depth: 64 };
+  const genRegion = { w: region.width, h: region.height, d: region.depth };
+  const seedLayout = worldgenMod.generate(seed, genRegion);
+
   const camera = new THREE.PerspectiveCamera(
     75,
     window.innerWidth / window.innerHeight,
     0.1,
     1000,
   );
-  camera.position.set(0, 6, 14);
+  // FIX 402.1: spawn in OPEN AIR above the terrain, not buried inside it. The old
+  // hardcoded (0, 6, 14) sat inside solid terrain for the default seed -> blank.
+  camera.position.set(
+    SPAWN.x,
+    computeSpawnY(seedLayout, { x: SPAWN.x, z: SPAWN.z, maxY: region.height }),
+    SPAWN.z,
+  );
+  // FIX 404.1: pitch the SPAWN camera DOWN at the terrain. The player-fly contract
+  // defaults the look straight down until facing is known, but the camera booted
+  // level (rotation 0,0,0) — from the corner spawn that is the void past the
+  // region edge, compounding the blank. Look-down at the real terrain instead.
+  // Pure layout math (see computeSpawnLookPitch), applied once at boot.
+  const spawnPitch = computeSpawnLookPitch(
+    camera.position.y,
+    seedLayout,
+    { x: SPAWN.x, z: SPAWN.z, maxY: region.height },
+  );
+  camera.rotation.set(spawnPitch, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -216,8 +316,6 @@ export async function main() {
   // block-palette (C5/C7). app-shell C1 assembles these into the world-store
   // and render adapter, then wires player/edit/hud onto the shared handles.
   // worldgen.generate reads {w,h,d}; world.js World.create reads {width,height,depth}.
-  const region = { width: 64, height: 24, depth: 64 };
-  const genRegion = { w: region.width, h: region.height, d: region.depth };
   const { BLOCKS, byId, selection } = blocksMod;
   const raycaster = new THREE.Raycaster();
 
@@ -228,10 +326,15 @@ export async function main() {
     renderer,
     camera,
     setAnimationLoop: (fn) => renderer.setAnimationLoop(fn),
-    makeWorld: (s) => {
-      const layout = worldgenMod.generate(s, genRegion);
-      return worldMod.World.create(s, region, layout, { byId });
-    },
+    // FIX 402.1: reuse the already-generated boot layout when asked for the
+    // boot seed (deterministic -> identical world, no double generation); for
+    // any other seed, generate on demand exactly as before.
+    makeWorld: (s) => worldMod.World.create(
+      s,
+      region,
+      s === seed ? seedLayout : worldgenMod.generate(s, genRegion),
+      { byId },
+    ),
     makeRenderer: (w) =>
       worldRenderMod.WorldRenderer.create(scene, w, { three: THREE, BLOCKS, byId }),
     makePlayer: () => playerMod.Player.create({ camera, domEl: renderer.domElement }),
