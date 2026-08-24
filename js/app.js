@@ -132,6 +132,28 @@ export function computeSpawnLookPitch(
   return -Math.atan2(drop, horiz);
 }
 
+// --- MC 586.1: ground probe for the player-fly floor clamp ------------------
+// The camera no longer sinks into the void: player-fly (applyFly) is handed a
+// getGroundY(wx, wz) that reports the WALKABLE surface Y at the camera's terrain
+// column, and clamps pos.y to never drop below it. Uses the SAME convention as
+// computeSpawnY / computeSpawnLookPitch: the camera's raw x/z ARE layout column
+// indices (verified by the 404.1 ray-march probe), one block == 1.0 world unit,
+// and the walkable surface sits at (top solid y + 1). Out-of-bounds columns
+// (beyond the region edge, over the void) report null -> no clamp, preserving
+// creative fly over the void. Pure / headless-importable like its siblings.
+export function makeGroundProbe(layout, maxY) {
+  if (!layout || !maxY) throw new TypeError('makeGroundProbe(layout, maxY)');
+  return (wx, wz) => {
+    const x = Math.floor(wx);
+    const z = Math.floor(wz);
+    let surface = -1;
+    for (let y = 0; y < maxY; y++) {
+      if (layout.get(x, y, z) !== 0) surface = y;
+    }
+    return surface >= 0 ? surface + 1 : null; // null = no terrain -> no clamp
+  };
+}
+
 // --- C1: lock overlay --------------------------------------------------------
 // Present the "Click to play" overlay first (I5). Takes DOM handles so it is
 // unit-testable headless. The overlay is hidden once pointer lock engages, and
@@ -162,12 +184,82 @@ export function prepareLockOverlay({ overlay, playBtn, onPlay }) {
   };
 }
 
+// --- FIX 543.1: release pointer lock on every loss-of-focus path -----------
+// Pointer Lock hides the OS cursor while locked. If the page loses focus and the
+// lock is never released, Chrome/Windows can leave a stray locked state where the
+// OS cursor stays hidden everywhere — in OTHER windows too — even after the tab is
+// closed (owner report MC 543.1). Current code only releases on Esc-in-canvas
+// (via PointerLockControls) and never on blur/hidden/pagehide.
+//
+// This helper is the robust, defensive handler. It takes injected event targets
+// (win/doc) and an onRelease callback, so it is headless-unit-testable exactly
+// like prepareLockOverlay above. onRelease is wrapped in try/catch so a guard
+// (e.g. "not actually locked") never throws uncaught — every path is attempted.
+// Returns a dispose() that removes all listeners.
+export function installPointerLockRelease({ win = window, doc = document, onRelease }) {
+  const safe = () => { try { if (onRelease) onRelease(); } catch (err) { /* defensive: never throw */ } };
+  const onBlur = () => safe();
+  const onPageHide = () => safe();
+  const onVis = () => {
+    // Only release when the document actually becomes hidden / tab loses visibility.
+    if (doc.visibilityState === 'hidden') safe();
+  };
+  win.addEventListener('blur', onBlur);
+  win.addEventListener('pagehide', onPageHide);
+  doc.addEventListener('visibilitychange', onVis);
+  return () => {
+    win.removeEventListener('blur', onBlur);
+    win.removeEventListener('pagehide', onPageHide);
+    doc.removeEventListener('visibilitychange', onVis);
+  };
+}
+
+// --- MC 586.1: WASD / Space / Shift fly controls ----------------------------
+// The player-fly module (player.js) fully implements a creative-fly wish-vector
+// (WASD relative to facing) plus vertical fly (up/down) and exposes press(key)/
+// release(key), but no shipped build ever WIRED the keyboard to it — so the only
+// motion was the idle gravity sink. This binds the standard controls to the
+// player's input API. Injected doc so it is headless-unit-testable like the
+// helpers above; returns dispose() removing the listeners. Digit keys / wheel /
+// R stay owned by the HUD (ui.js) — no overlap with this map.
+export const MOVE_KEYS = {
+  KeyW: 'forward', KeyS: 'backward', KeyA: 'left', KeyD: 'right',
+  Space: 'up', ShiftLeft: 'down', ShiftRight: 'down',
+};
+export function installMovementControls({ player, doc = document, keymap = MOVE_KEYS }) {
+  if (!player || typeof player.press !== 'function') {
+    throw new TypeError('installMovementControls requires a player with press/release');
+  }
+  const onDown = (e) => {
+    const dir = keymap[e.code];
+    if (!dir) return;
+    e.preventDefault();      // Space must not scroll / click the play button
+    player.press(dir);
+  };
+  const onUp = (e) => {
+    const dir = keymap[e.code];
+    if (!dir) return;
+    player.release(dir);
+  };
+  doc.addEventListener('keydown', onDown);
+  doc.addEventListener('keyup', onUp);
+  return () => {
+    doc.removeEventListener('keydown', onDown);
+    doc.removeEventListener('keyup', onUp);
+  };
+}
+
 // --- C1: composition root ----------------------------------------------------
 // deps =
 //   seed           : string
 //   registry       : createTickRegistry()
 //   scene          : THREE.Scene handle
 //   setAnimationLoop(fn) : single rAF hook (renderer.setAnimationLoop)
+//   render         : () => void  (optional) — per-frame draw. MUST call
+//                    renderer.render(scene, camera); supplied from main().
+//                    setAnimationLoop(fn) replaces Three's default loop, so the
+//                    frame is NOT auto-drawn — without this render() the scene
+//                    never reaches the canvas (blank screen, MC 453.1).
 //   makeWorld(seed)      : world-store data (C9/C10/C18)
 //   makeRenderer(world, scene) : worldrender adapter (C12/C19)
 //   makePlayer(deps)     : player-fly (C13)
@@ -178,6 +270,7 @@ export function boot({
   registry,
   scene,
   setAnimationLoop,
+  render,
   makeWorld,
   makeRenderer,
   makePlayer,
@@ -216,8 +309,33 @@ export function boot({
     registry.registerTick(fn);
   }
 
-  // Single rAF loop. time is ms since start; our ticks expect dt in ms-equivalent.
-  setAnimationLoop((time) => registry.run(typeof time === 'number' ? time : 0));
+  // Single rAF loop. `time` is ABSOLUTE ms since start (Three setAnimationLoop
+  // contract) — NOT a per-frame delta. Feed ticks a CLAMPED, PER-SECOND delta so
+  // position integration (player applyFly: pos += vel * dt) is stable AND uses
+  // the intended units. Two units bugs converge here:
+  //   * MC 466.1 — absolute time was fed as the delta, so dt ~ session length and
+  //     the gravity sink launched the camera to -236M. Fix: per-frame delta.
+  //   * MC 586.1 (root cause) — even a per-frame delta in *milliseconds* (~16.7)
+  //     against per-second constants (speed=8, gravityFeel=0.35) makes the camera
+  //     fall ~350 u/s through a 24-tall world (instant black) and WASD ~8000 u/s
+  //     (unusable). The constants are per-SECOND, so convert the delta ms -> s.
+  //     (A terrain floor clamp in applyFly, MC 586.1, additionally guarantees the
+  //     idle sink can never pass the ground for any session length.)
+  // render() per frame draws the scene — required because setAnimationLoop(fn)
+  // replaces Three's default loop (MC 453.1 blank-screen).
+  const DELTA_MAX = 100; // ms; clamp rAF gaps (tab refocus / GC hitch)
+  let lastTime = null;   // null = first frame: no predecessor to diff against
+  setAnimationLoop((time) => {
+    const t = typeof time === 'number' ? time : 0;
+    let dtMs;
+    if (lastTime == null) dtMs = 0;    // first frame — start the delta clock
+    else dtMs = t - lastTime;          // per-frame delta from the last frame, ms
+    lastTime = t;
+    if (!Number.isFinite(dtMs) || dtMs < 0) dtMs = 0; // guard NaN/rollback
+    dtMs = Math.min(dtMs, DELTA_MAX);  // clamp spikes; never blow through
+    registry.run(dtMs / 1000);         // ticks integrate in SECONDS (MC 586.1)
+    if (typeof render === 'function') render();
+  });
 
   return {
     world,
@@ -326,6 +444,11 @@ export async function main() {
     renderer,
     camera,
     setAnimationLoop: (fn) => renderer.setAnimationLoop(fn),
+    // MC 453.1: setAnimationLoop(fn) REPLACES Three's default loop, so the app's
+    // custom fn (below) must draw the frame itself. render() calls the real
+    // renderer.render(scene, camera) every frame — without it the scene is
+    // updated but never painted (blank screen).
+    render: () => renderer.render(scene, camera),
     // FIX 402.1: reuse the already-generated boot layout when asked for the
     // boot seed (deterministic -> identical world, no double generation); for
     // any other seed, generate on demand exactly as before.
@@ -337,7 +460,14 @@ export async function main() {
     ),
     makeRenderer: (w) =>
       worldRenderMod.WorldRenderer.create(scene, w, { three: THREE, BLOCKS, byId }),
-    makePlayer: () => playerMod.Player.create({ camera, domEl: renderer.domElement }),
+    makePlayer: () =>
+      playerMod.Player.create({
+        camera,
+        domEl: renderer.domElement,
+        // MC 586.1: feed the terrain surface to player-fly so the camera can never
+        // sink through the ground into the void, for any session length.
+        getGroundY: makeGroundProbe(seedLayout, region.height),
+      }),
     makeEdit: (shared) =>
       editMod.Edit.create({ world: shared.world, scene, selection, camera, raycaster }),
     makeHud: (shared) =>
@@ -356,6 +486,25 @@ export async function main() {
     playBtn,
     onPlay: () => (app.player && app.player.lock ? app.player.lock() : Promise.resolve()),
   });
+
+  // FIX 543.1: guarantee the mouse is released on every loss-of-focus path
+  // (window blur, tab hidden, page unload), not just Esc-in-canvas. Calling
+  // document.exitPointerLock() when nothing is locked is a safe no-op (and never
+  // throws), so it runs alongside player.unlock() to clear any stray OS lock
+  // even if the three.js controls object was never created. Restore cursor
+  // everywhere on the desktop (owner report MC 543.1).
+  const disposePointerLockRelease = installPointerLockRelease({
+    onRelease: () => {
+      if (app.player && typeof app.player.unlock === 'function') app.player.unlock();
+      if (document.exitPointerLock) document.exitPointerLock();
+    },
+  });
+
+  // MC 586.1: wire WASD / Space / Shift to the player-fly input API so the
+  // creative-fly camera can actually move (was never bound in prior builds).
+  const disposeMovement = app.player
+    ? installMovementControls({ player: app.player })
+    : () => {};
 
   const onResize = () => {
     camera.aspect = window.innerWidth / window.innerHeight;

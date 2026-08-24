@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "vm106 hosting config -- STRICT JSON (no yaml lib). Commit at repo root.",
+    "Static site: index.html + js/ + css/ are served as-is from the mirror dir.",
+    "Schema owner: infra/vm106/repo-visibility-hosting/reconcile.py (do not fork)."
+  ],
+  "name": "futurecraft",
+  "type": "static",
+  "root": "apps/futurecraft",
+  "title": "FutureCraft",
+  "description": "A browser voxel sandbox built from scratch with Three.js -- fly, look, and build in a deterministic block world.",
+  "tags": ["threejs", "voxel", "webgl", "game", "sandbox"],
+  "icon": "cube"
+}

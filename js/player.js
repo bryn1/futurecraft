@@ -12,8 +12,13 @@
 // Applies a speed-scaled horizontal wish-vector (from WASD vs yaw) plus a
 // vertical component: space/up ascends, shift/down descends at speed; when
 // neither up nor down is held, a gentle low-gravity sink (gravityFeel) applies.
+// Optional getGroundY(xWorld, zWorld) provides the walkable surface height
+// (top solid block + 1) at the camera's terrain column: when supplied, pos.y is
+// clamped so the camera can NEVER sink into the terrain/void (MC 586.1), no
+// matter how long the session runs. Absent = no clamp (old behavior, creative
+// fly over the void); null/undefined returned = no terrain here.
 // ---------------------------------------------------------------------------
-export function applyFly(state, input, { speed, gravityFeel }, dt) {
+export function applyFly(state, input, { speed, gravityFeel, getGroundY }, dt) {
   const yaw = state.yaw || 0;
   // horizontal wish-vector from WASD relative to facing (yaw about +Y, forward -Z)
   let wx = 0;
@@ -34,6 +39,16 @@ export function applyFly(state, input, { speed, gravityFeel }, dt) {
   else if (input.down) pos.y -= speed * dt;
   else pos.y -= gravityFeel * dt;
 
+  // MC 586.1 terrain floor clamp — never sink through the ground into the void.
+  // Runs after vertical motion (so up-fly is unaffected) and after the (x,z)
+  // move (so the clamp tracks the column the camera is actually over).
+  if (typeof getGroundY === 'function') {
+    const ground = getGroundY(pos.x, pos.z);
+    if (ground != null && Number.isFinite(ground) && pos.y < ground) {
+      pos.y = ground;
+    }
+  }
+
   return state;
 }
 
@@ -53,7 +68,7 @@ export function directionFrom(yaw, pitch) {
 // the first lock(), keeping the module loadable headless (no top-level bare
 // THREE import) and matching the CDN-no-build project setup.
 // ---------------------------------------------------------------------------
-function createPlayer({ camera, domEl, speed = 8, gravityFeel = 0.35, controls = null } = {}) {
+function createPlayer({ camera, domEl, speed = 8, gravityFeel = 0.35, getGroundY = null, controls = null } = {}) {
   const state = {
     position: camera.position,
     direction: { x: 0, y: -1, z: 0 }, // default look straight down until facing known
@@ -110,7 +125,7 @@ function createPlayer({ camera, domEl, speed = 8, gravityFeel = 0.35, controls =
     // ---- C13 update(dt): called each tick via C2 registerTick ----
     update(dt) {
       syncFacing();
-      applyFly(state, input, { speed, gravityFeel }, dt);
+      applyFly(state, input, { speed, gravityFeel, getGroundY }, dt);
       // write integrated position back to the camera so raycasts originate there
       camera.position.x = state.position.x;
       camera.position.y = state.position.y;
