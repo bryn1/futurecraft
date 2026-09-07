@@ -40,15 +40,18 @@ export function placeAt(world, p, faceNormal, blockId) {
 
 // C14. create(): registers a raycast+input handler active only while pointer-locked.
 // `raycaster` is built by app.js from three and passed in (design: "passed at
-// wiring by app.js, no import"). Returns { tick, dispose } — app.js (C1) calls
-// registerTick(tick) via C2 and calls `dispose` to tear down (removes DOM
-// listeners; the C2 unsubscribe handle is app-owned).
-export function create({ world, scene, selection, camera, raycaster }) {
+// wiring by app.js, no import"). `doc` is injected for headless unit tests of the
+// FULL pointer-lock input path (mousedown=break, right-click=place); it defaults
+// to the browser `document` so shipped behaviour is unchanged. Returns
+// { tick, dispose } — app.js (C1) calls registerTick(tick) via C2 and calls
+// `dispose` to tear down (removes DOM listeners; the C2 unsubscribe handle is
+// app-owned).
+export function create({ world, scene, selection, camera, raycaster, doc = document }) {
   const listeners = [];
 
   // C16 input mapping: pointer-locked only, left = break, right = place. No keys.
   function onPointerDown(e) {
-    if (document.pointerLockElement === null) return; // not locked
+    if (doc.pointerLockElement === null) return; // not locked
     if (!raycaster) return; // cannot raycast without an injected raycaster
 
     // Crosshair-centered raycast along the camera's forward (render chunks are
@@ -71,9 +74,9 @@ export function create({ world, scene, selection, camera, raycaster }) {
 
   function onContextMenu(e) { e.preventDefault(); } // keep right-click from opening menu
 
-  document.addEventListener('mousedown', onPointerDown);
-  document.addEventListener('contextmenu', onContextMenu);
-  listeners.push([document, 'mousedown', onPointerDown], [document, 'contextmenu', onContextMenu]);
+  doc.addEventListener('mousedown', onPointerDown);
+  doc.addEventListener('contextmenu', onContextMenu);
+  listeners.push([doc, 'mousedown', onPointerDown], [doc, 'contextmenu', onContextMenu]);
 
   // C2-registered by app.js: per-frame hook (reserved; nothing frame-critical yet).
   function tick() {}

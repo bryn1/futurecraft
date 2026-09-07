@@ -16,8 +16,8 @@ Live demo: https://sibbamala.com/futurecraft/
   with a terrain floor clamp so the camera rests on the ground instead of sinking through it.
 - **Raycast build/break** — break and place blocks under the crosshair (`js/edit.js`).
 - **Clean, testable architecture** — pure, headless-importable modules wired by a single
-  composition root (`js/app.js`); the physics/probe fixes ship with `node:test` suites in
-  `js/*.test.mjs`.
+  composition root (`js/app.js`); the movement, physics, ground-probe and edit-input paths
+  ship with `node:test` suites in `js/*.test.mjs`.
 
 ## Controls
 
@@ -48,11 +48,29 @@ python3 -m http.server 8000
 
 ## Tests
 
-The fly/physics and ground-probe fixes are covered by headless unit tests:
+The full headless `node:test` suite (run from the repo root — the domain modules are
+pure/headless-importable, no browser needed):
 
 ```sh
-node --test js/player.ground.test.mjs js/probe.ground.test.mjs
+node --test js/*.test.mjs
 ```
+
+The suites cover:
+
+- **`js/app.movement.test.mjs`** — WASD / Space / Shift are wired to the player's
+  creative-fly input API (true toggle, no sticky keys); forward travel is
+  **camera/view-relative** (turn 180° and W flies the other way); the animation loop feeds
+  **per-second** deltas so movement uses the correct units (no constant sink / runaway);
+  `dispose()` removes the listeners. (MC 586.1 / 625.1)
+- **`js/player.ground.test.mjs`** — creative-fly kinematics and the terrain floor clamp:
+  the camera can never sink below the ground surface. (MC 586.1)
+- **`js/probe.ground.test.mjs`** — the ground-probe physics helper (column height lookup,
+  out-of-region handling, fail-fast misuse).
+- **`js/edit.handlers.test.mjs`** — raycast build/break input handlers under pointer lock
+  (left-click break, right-click place, face-normal placement). Testable headlessly via the
+  injected `doc` (defaults to the browser `document`; shipped behaviour unchanged).
+- **`js/app.pointerlock.test.mjs`** — pointer-lock release on blur / hidden / pagehide so the
+  cursor is never trapped after tab-switch or context loss. (MC 543.1)
 
 ## Hosting
 
