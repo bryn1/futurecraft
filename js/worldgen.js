@@ -1,7 +1,7 @@
 // FutureCraft module: world-gen (js/worldgen.js) — C8.
 // Deterministic procedural terrain for a seed over a bounded region.
 //   generate(seed:string, {w,h,d}:Region): Layout
-// MIT-style: authored by teddy for svarkor-ai/futurecraft.
+// MIT-style: authored by teddy for bryn1/futurecraft.
 // Contracts cited: C8 (DESIGN.md §3, module 206.2 rev-2).
 import { BLOCKS } from './blocks.js';
 
